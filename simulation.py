@@ -8,7 +8,7 @@ black = (0,0,0)
 white = (255, 255, 255)
 red = (255, 0, 0)
 green = (0, 255, 0)
-blue = (0, 0, 255)
+blue = (0,100,255)
 gray = (47,79,79)
 
 window_size = (500, 500)
@@ -24,26 +24,26 @@ GREEN = 1
 BLUE = 2
     
 types_to_colors = [red, green, blue]
-types_to_sidelengths = [4, 6, 10]
+types_to_sidelengths = [4, 6, 8]
 
 # TODO:
 """
-    1. Data sctructure for reactions
-    2. Timed reactions. Add to Particle class.
-
-    3. Save history
-    4. Controls, step forward/back
+    Save history
+    Controls, step forward/back
+    Time/probability in reactions?
     
 """
 
 class Particle(pygame.Rect):
     def __init__(self, top, left, typ):
-        s = types_to_sidelengths[typ]
-        super().__init__(top, left, s, s)
+        self.length = types_to_sidelengths[typ]
+        super().__init__(top, left, self.length, self.length)
         self.typ = typ
 
     # make a random nearby particle  
-    def spawn(self, radius, typ):
+    def spawn(self, typ, radius=None):
+        if radius is None:
+            radius = self.length
         x = random.randint(self.x - radius, self.x + radius)
         y = random.randint(self.y - radius, self.y + radius)
         if x > window_size[0] - 1 or x < 0:
@@ -63,23 +63,20 @@ class Simulation:
     def populate_matrix(self):
         for particle in self.particles:
             self.matrix[particle.x][particle.y][particle.typ] += 1
-
+    
     # count overlapping particles, including particle itself
     def count_overlapping(self, particle, stride = 1):
         counts = np.zeros(self.num_types, dtype="int16")
-        indices = []
         sidelength = types_to_sidelengths[particle.typ]
         for x in range(max(0, particle.x - sidelength), \
                 min(particle.x + sidelength + 1, window_size[0]), stride):
             for y in range(max(0, particle.y - sidelength), \
                     min(particle.y + sidelength + 1, window_size[1]), stride):
-                # get counts and indices for all nonzero counts
-                if (self.matrix[x][y][:] > 0).any():
-                    indices.append([x, y])
-                    counts += self.matrix[x][y][:]
-        if [particle.x, particle.y] not in indices:
-            indicies.append([particle.x, particle.y])
-        return counts, indices 
+                # add matrix entry to counts
+                # remove entry from matrix
+                counts += self.matrix[x][y][:]
+                self.matrix[x][y][:] = 0
+        return counts 
     
     def total_counts(self):
         counts = np.zeros(self.num_types, dtype="int64")
@@ -87,28 +84,29 @@ class Simulation:
             counts[particle.typ] += 1
         return counts
 
-    def do_reactions(self, particle, counts, indices, reactions):
-        for reaction in reactions:
-            if np.array_equal(counts, reaction[0]):
-                print(f'reaction {particle.x, particle.y, counts, indices}')
-                # remove matrix entries
-                for x, y in indices:
-                    self.matrix[x][y][:] = 0
-                # get final particles
-                final = []
-                for i in range(len(reaction[1])):
-                    final += [particle.spawn(step, i) for _ in range(reaction[1][i])]
-                return final
-        # brownian
-        self.matrix[particle.x][particle.y][particle.typ] -= 1
-        return [particle.spawn(step, particle.typ)]
+    def do_reactions(self, particle, counts, reactions):
+        # reactions must include brownian motion for each type of particle!
+        reaction_set = set(reactions)
+        new_particles = []
+        while (counts > 0).any():
+            random_reaction = random.sample(reaction_set, 1)[0]
+            if (random_reaction[0] <= counts).all():
+                # do reaction
+                for i in range(len(random_reaction[1])):
+                    for j in range(random_reaction[1][i]):
+                        new_particles.append(particle.spawn(i, radius=max(types_to_sidelengths)))
+                # decrement counts
+                counts -= random_reaction[0]
+            else:
+                reaction_set.remove(random_reaction)
+        return new_particles 
 
     def step(self):
         new_particles = []
         for particle in self.particles:
             if self.matrix[particle.x][particle.y][particle.typ] > 0:
-                counts, indices = self.count_overlapping(particle, 1)
-                new_particles += self.do_reactions(particle, counts, indices, reactions)
+                counts = self.count_overlapping(particle, 1)
+                new_particles += self.do_reactions(particle, counts, reactions)
         self.particles = new_particles
         # make sure matrix is empty
         assert (self.matrix == 0).all(), str(np.sum(self.matrix != 0))
@@ -126,7 +124,10 @@ if __name__ == '__main__':
     initial_particles = reds + greens
 
     reactions = [
-            [[1, 1, 0], [0, 0, 1]]
+            ((1, 0, 0), (1, 0, 0)),
+            ((0, 1, 0), (0, 1, 0)),
+            ((0, 0, 1), (0, 0, 1)),
+            ((1, 1, 0), (0, 0, 1))
             ]
 
     simulation = Simulation(window_size[0], window_size[1], initial_particles, 3, reactions)
@@ -135,7 +136,7 @@ if __name__ == '__main__':
 
     while True:
         print(simulation.total_counts())
-        screen.fill(gray)
+        screen.fill(black)
         simulation.draw(screen)
         pygame.display.update()
         simulation.step()
