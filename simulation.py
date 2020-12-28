@@ -2,6 +2,7 @@ import pygame
 import time
 import sys
 import random
+import pickle
 import numpy as np
 
 black = (0,0,0)
@@ -150,20 +151,99 @@ def main():
 
     simulation = Simulation(window_size[0], window_size[1], initial_particles, 3, reactions)
 
+
     screen = pygame.display.set_mode(window_size)
 
-    while True:
-        print(simulation.total_counts())
-        screen.fill(black)
-        simulation.draw(screen)
-        pygame.display.update()
-        simulation.step()
-        time.sleep(0.001)
+    # TODO: save history
+    # TODO: playback function to animate history
+    #           history can just be a list of particles, because that's all we need to do animations!
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                break
+    history = []
+
+    def animate(save_history=True):
+        running = True
+        while running:
+            print(simulation.total_counts())
+            screen.fill(black)
+            simulation.draw(screen)
+            pygame.display.update()
+
+            if save_history:
+                history.append(simulation.particles)
+
+            simulation.step()
+            time.sleep(0.001)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    running = False
+        if save_history:
+            with open('history.pickle', 'wb') as f:
+                pickle.dump(history, f)
+
+    def playback(history):
+        '''
+        play/pause: ENTER
+        forward/back: j/k
+        forward/backx10: h/l
+        '''
+        # state variables
+        index = 0
+        paused = True
+        running = True
+
+        # game loop
+            # user input
+            # change state
+            # render
+
+        # game loop
+        while running:
+            # user input
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    running = False
+                if event.type == pygame.KEYDOWN:
+                    # change state 
+                    # play/pause
+                    if event.key == pygame.K_RETURN:
+                        paused = not paused
+                    # forward/back
+                    if event.key == pygame.K_j:
+                        index = min(len(history) - 1, index + 1)
+                    if event.key == pygame.K_k:
+                        index = max(0, index - 1)
+                    # forward/back x10
+                    if event.key == pygame.K_h:
+                        index = min(len(history) - 1, index + 10)
+                    if event.key == pygame.K_l:
+                        index = max(0, index - 10)
+                    # jump around
+                    if event.key in range(pygame.K_0, pygame.K_9):
+                        index = (len(history) - 1) * (event.key - pygame.K_0) // 10
+            if running:
+                if not paused:
+                    index = min(len(history) - 1, index + 1)
+                # render
+                screen.fill(black)
+                for particle in history[index]:
+                    pygame.draw.rect(screen, types_to_colors[particle.typ], particle)
+                pygame.display.update()
+
+    # --------------------- Run ---------------------- 
+    animate()
+
+    screen = pygame.display.set_mode(window_size)
+
+    # Trying to load the pickled history, but it's giving me:
+    #   TypeError: __init__() takes 4 positional arguments but 5 were given 
+    #
+    # with open('history.pickle', 'rb') as f:
+    #     history = pickle.load(f)
+
+    playback(history)
 
 if __name__ == '__main__':
     main()
