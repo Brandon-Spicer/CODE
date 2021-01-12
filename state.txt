@@ -1,0 +1,4 @@
+State: Most recent version of code in simulation.py.
+WebGL test (just draws a lot of rectangles fast) in example.* and index.html, runnable in vscode with config launch.json.
+
+TODO: ???
