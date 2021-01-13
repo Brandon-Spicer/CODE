@@ -14,21 +14,35 @@ gray = (47,79,79)
 
 window_size = (500, 500)
 
-nRed = 100
-nGreen = 100 
+nRed = 10000
+nGreen = 1000 
 
 particle_size = 5
 step = 5
 
-RED = 0
-GREEN = 1
-BLUE = 2
+WHITE = 0
+GRAY = 1
+RED = 2
     
-types_to_colors = [red, green, blue]
+types_to_colors = [white, gray, red]
 types_to_sidelengths = [4, 6, 8]
 
 # TODO:
 """
+    Implement sorting algorithm
+        sort particles by x coordinate
+        get clumps of overlapping particles
+        for each clump,
+            sort particles by y coordinate
+            get clumps of overlapping particles, store in component_list 
+        we have component_list 
+
+        for component in component_list:
+            cycle reactions until particles are used up.
+            
+
+
+
     Save history
     Controls, step forward/back
     Time/probability in reactions?
@@ -36,10 +50,11 @@ types_to_sidelengths = [4, 6, 8]
 """
 
 class Particle(pygame.Rect):
-    def __init__(self, top, left, typ):
+    def __init__(self, left, top, typ):
         self.length = types_to_sidelengths[typ]
-        super().__init__(top, left, self.length, self.length)
+        super().__init__(left, top, self.length, self.length)
         self.typ = typ
+        self.pos = [left, top]
 
     def spawn(xi, yi, typ, radius=None):
         if radius is None:
@@ -65,68 +80,104 @@ class Simulation:
         for particle in self.particles:
             self.matrix[particle.x][particle.y][particle.typ] += 1
 
-    # count overlapping particles, including particle itself
-    def count_overlapping(self, particle, stride = 1):
-        counts = np.zeros(self.num_types, dtype="int16")
-        indices = [[] for _ in range(len(counts))]
-        length = particle.length
-        for x in range(max(0, particle.x - length), \
-                min(particle.x + length + 1, window_size[0]), stride):
-            for y in range(max(0, particle.y - length), \
-                    min(particle.y + length + 1, window_size[1]), stride):
-                if (self.matrix[x][y][:] > 0).any():
-                    counts += self.matrix[x][y][:]
-                    for i, n in enumerate(self.matrix[x][y]):
-                        indices[i] += [(x, y)] * n
-                    self.matrix[x][y][:] = 0
-        assert np.array([a == len(b) for a,b in zip(counts, indices)]).all(), str(counts) + str(indices)
-        return counts, indices
-
     def total_counts(self):
         counts = np.zeros(self.num_types, dtype="int64")
         for particle in self.particles:
             counts[particle.typ] += 1
         return counts
 
-    def do_reactions(self, particle, counts, indices, reactions):
-        # reactions must include brownian motion for each type of particle!
+
+    #TODO: new do_reactions
+    def do_reactions(self, clump, reactions):
         reaction_set = set(reactions)
         new_particles = []
-        while (counts > 0).any():
-            reactants, products = random.sample(reaction_set, 1)[0]
 
+        counts = np.array([0] * self.num_types)
+        for particle in clump:
+            counts[particle.typ] += 1
+
+        positions = [[] for _ in range(self.num_types)]
+        for particle in clump:
+            positions[particle.typ] += [particle.pos]
+
+        while (counts > 0).any():
+            reactants, products, p = random.sample(reaction_set, 1)[0]
+            # if reaction is possible
             if (reactants <= counts).all():
-                # get indices of initial reactants
-                reactant_indices = set()
-                for i in range(len(indices)):
-                    # get reactants[i] x,y pairs from indices[i] and add to slice
-                    slice_i = indices[i][len(indices[i]) - reactants[i]:]
-                    indices[i] = indices[i][:len(indices[i]) - reactants[i]]
+                reactant_positions = set()
+
+                # get positions of reactants and add to set
+                for i in range(len(positions)):
+                    slice_i = positions[i][len(positions[i]) - reactants[i]:]
+                    positions[i] = positions[i][:len(positions[i]) - reactants[i]]
                     for (x, y) in slice_i:
-                        reactant_indices.add((x, y))
-                assert len(reactant_indices) > 0, 'reactant_indices is empty!'
+                        reactant_positions.add((x, y))
+
+                assert len(reactant_positions) > 0, 'reactant_positions is empty!'
+
+                # rng for reaction success
+                if random.random() < p:
+                    output = products
+                else:
+                    output = reactants
 
                 # create reaction product particles 
-                for i in range(len(products)):
-                    for j in range(products[i]):
-                        # get a random index from reactant_indices_set
-                        x, y = random.sample(reactant_indices, 1)[0]
+                for i in range(len(output)):
+                    for j in range(output[i]):
+                        # get a random position from the set
+                        x, y = random.sample(reactant_positions, 1)[0]
                         new_particles.append(Particle.spawn(x, y, i, radius=max(types_to_sidelengths)))
                 counts -= reactants 
             else:
-                reaction_set.remove((reactants, products))
+                reaction_set.remove((reactants, products, p))
         return new_particles 
+
+    
+    # clump replaces count_overlapping
+    def clump(particles, dim = 0):
+        '''
+        clump(particles: list[Particle]) -> clumps: list[list[Particle]]
+
+        sort particles by given dimension and seperate them into lists
+        containing only overlapping particles
+
+        '''
+
+        #TODO: put limit on upper - lower to avoid giant components
+
+        component_list = []
+        component = []
+        upper = 0
+        lower = 1 
+        sorted_particles = sorted(particles, key=lambda x : x.pos[dim])
+
+        for particle in sorted_particles:
+            if lower <= particle.pos[dim] <= upper and not upper - lower > particle.length*2:
+                component.append(particle)
+                upper = max(upper, particle.pos[dim] + particle.length - 1)
+                lower = min(lower, particle.pos[dim] - particle.length + 1)
+            else:
+                if len(component) > 0 :
+                    component_list.append(component)
+                component = [particle]
+                upper = particle.pos[dim] + particle.length - 1
+                lower = particle.pos[dim] - particle.length + 1
+
+        component_list.append(component)
+
+        return component_list
+
 
     def step(self):
         tick = time.time()
         new_particles = []
-        for particle in self.particles:
-            if self.matrix[particle.x][particle.y][particle.typ] > 0:
-                counts, indices = self.count_overlapping(particle, 1)
-                new_particles += self.do_reactions(particle, counts, indices, self.reactions)
+
+        for xclump in Simulation.clump(self.particles, 0):
+            for component in Simulation.clump(xclump, 1):
+                new_particles += self.do_reactions(component, self.reactions)
+            
+
         self.particles = new_particles
-        # make sure matrix is empty
-        assert (self.matrix == 0).all(), str(np.sum(self.matrix != 0))
         self.populate_matrix()
         tock = time.time()
         print(f'step time: {round(tock - tick, 3)}')
@@ -138,15 +189,16 @@ class Simulation:
 def main():
     reds = [Particle(random.randint(0, window_size[0] - 1), \
             random.randint(0, window_size[1] - 1), RED) for _ in range(nRed)]
-    greens = [Particle(random.randint(0, window_size[0] - 1), \
-            random.randint(0, window_size[1] - 1,), GREEN) for _ in range(nGreen)]
-    initial_particles = reds + greens
+    initial_particles = reds
 
+
+    # reaction: ((reactants), (products), probability)
     reactions = [
-            ((1, 0, 0), (1, 0, 0)),
-            ((0, 1, 0), (0, 1, 0)),
-            ((0, 0, 1), (0, 0, 1)),
-            ((1, 1, 0), (0, 0, 1))
+            ((1, 0, 0), (1, 0, 0), 1),
+            ((0, 1, 0), (0, 1, 0), 1),
+            ((0, 0, 1), (0, 0, 1), 1),
+            ((1, 1, 0), (0, 0, 1), 1),
+            ((0, 0, 1), (1, 1, 0), 0.01)
             ]
 
     simulation = Simulation(window_size[0], window_size[1], initial_particles, 3, reactions)
